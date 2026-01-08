@@ -3,10 +3,12 @@ import bodyParser from 'body-parser';
 import cors from 'cors';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
+import path from 'path';
 
 // 声明全局类型
 declare const process: any;
 declare const console: any;
+declare const __dirname: string;
 
 dotenv.config();
 
@@ -16,6 +18,19 @@ const PORT = process.env.PORT || 3000;
 // 中间件
 app.use(cors());
 app.use(bodyParser.json());
+
+// 提供静态文件（管理界面）
+app.use(express.static(path.join(__dirname, '../public')));
+
+// 管理界面路由 - 确保 /admin.html 可以访问
+app.get('/admin.html', (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/admin.html'));
+});
+
+// 根路径也可以访问管理界面
+app.get('/admin', (req, res) => {
+    res.redirect('/admin.html');
+});
 
 // 数据库连接池
 const pool = new Pool({
