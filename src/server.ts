@@ -115,6 +115,107 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ============================================================
+// 管理员接口
+// ============================================================
+
+const ADMIN_TOKEN = 'kiro-2024-your-505768069';
+
+// 生成激活码（管理员接口）
+app.post('/api/admin/create-activation-code', async (req, res) => {
+    try {
+        const { admin_token, points, expire_days } = req.body;
+        
+        if (admin_token !== ADMIN_TOKEN) {
+            return res.json({ code: 1, message: '无权限' });
+        }
+        
+        // 生成激活码：XXXX-XXXX-XXXX-XXXX
+        const code = Array(4).fill(0).map(() => 
+            Math.random().toString(36).substring(2, 6).toUpperCase()
+        ).join('-');
+        
+        // 计算过期时间
+        const expireAt = new Date();
+        expireAt.setDate(expireAt.getDate() + (expire_days || 30));
+        
+        const result = await pool.query(
+            `INSERT INTO activated_codes (code, points, expire_at)
+             VALUES ($1, $2, $3)
+             RETURNING id, code, points, expire_at`,
+            [code, points || 1000, expireAt]
+        );
+        
+        res.json({
+            code: 0,
+            message: '激活码生成成功',
+            data: result.rows[0]
+        });
+    } catch (error: any) {
+        console.error('生成激活码失败:', error);
+        res.json({ code: 1, message: error.message });
+    }
+});
+
+// 添加 GitHub 账号（管理员接口）
+app.post('/api/admin/add-github-account', async (req, res) => {
+    try {
+        const { admin_token, email, github_token, github_username, profile_arn, activated_code_id } = req.body;
+        
+        if (admin_token !== ADMIN_TOKEN) {
+            return res.json({ code: 1, message: '无权限' });
+        }
+        
+        // 插入账号
+        const result = await pool.query(
+            `INSERT INTO accounts (email, source, github_token, github_username, profile_arn, activated_code_id)
+             VALUES ($1, 'github', $2, $3, $4, $5)
+             RETURNING id, email, github_username`,
+            [email, github_token, github_username, profile_arn || 'arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK', activated_code_id]
+        );
+        
+        res.json({
+            code: 0,
+            message: 'GitHub 账号添加成功',
+            data: result.rows[0]
+        });
+    } catch (error: any) {
+        console.error('添加 GitHub 账号失败:', error);
+        res.json({ code: 1, message: error.message });
+    }
+});
+
+// 查看所有账号（管理员接口）
+app.post('/api/admin/list-accounts', async (req, res) => {
+    try {
+        const { admin_token } = req.body;
+        
+        if (admin_token !== ADMIN_TOKEN) {
+            return res.json({ code: 1, message: '无权限' });
+        }
+        
+        const result = await pool.query(
+            `SELECT a.id, a.email, a.source, a.github_username, a.is_hidden, 
+                    ac.code as activated_code, a.added_at
+             FROM accounts a
+             LEFT JOIN activated_codes ac ON a.activated_code_id = ac.id
+             ORDER BY a.added_at DESC`
+        );
+        
+        res.json({
+            code: 0,
+            data: { accounts: result.rows }
+        });
+    } catch (error: any) {
+        console.error('查询账号失败:', error);
+        res.json({ code: 1, message: error.message });
+    }
+});
+
+// ============================================================
+// 用户接口
+// ============================================================
+
 // 1. 用户登录/注册
 app.post('/api/user/login', async (req, res) => {
     try {
