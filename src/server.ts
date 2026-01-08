@@ -4,6 +4,10 @@ import cors from 'cors';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
+// 声明全局类型
+declare const process: any;
+declare const console: any;
+
 dotenv.config();
 
 const app = express();
