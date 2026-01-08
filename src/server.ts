@@ -48,10 +48,13 @@ async function initDatabase() {
                 email VARCHAR(255),
                 password VARCHAR(255),
                 source VARCHAR(20) DEFAULT 'google',
-                refresh_token TEXT NOT NULL,
+                refresh_token TEXT,
                 access_token TEXT,
                 client_id VARCHAR(255),
                 client_secret TEXT,
+                github_token TEXT,
+                github_username VARCHAR(255),
+                profile_arn VARCHAR(255),
                 is_hidden BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -393,6 +396,106 @@ app.get('/api/announcement', (req, res) => {
             announcement: '🎉 欢迎使用 Kiro 飞行模式！<br>💰 100积分 = 1个账号<br>📧 联系管理员获取激活码'
         }
     });
+});
+
+// 8. 提取 GitHub 账号
+app.post('/api/github/exchange', async (req, res) => {
+    try {
+        const { device_id } = req.body;
+
+        const userResult = await pool.query('SELECT * FROM users WHERE device_id = $1', [device_id]);
+        
+        if (userResult.rows.length === 0) {
+            return res.json({ code: 1, message: '用户不存在' });
+        }
+
+        const user = userResult.rows[0];
+
+        if (user.points < 100) {
+            console.log(`⚠️ 提取GitHub账号失败: 积分不足 - ${device_id}, 当前积分: ${user.points}`);
+            return res.json({ code: 1, message: '积分不足，需要100积分' });
+        }
+
+        // 创建测试 GitHub 账号（实际使用时需要从账号池获取）
+        const timestamp = Date.now();
+        const randomStr = Math.random().toString(36).substring(2, 10);
+        const newAccount = {
+            email: `github${timestamp}@example.com`,
+            username: `kiro-user-${randomStr}`,
+            github_token: `ghp_${randomStr}${timestamp}`,
+            profile_arn: `arn:aws:iam::123456789012:user/github-${randomStr}`,
+            source: 'github'
+        };
+
+        const accountResult = await pool.query(
+            'INSERT INTO accounts (user_id, email, github_token, github_username, profile_arn, source) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+            [user.id, newAccount.email, newAccount.github_token, newAccount.username, newAccount.profile_arn, newAccount.source]
+        );
+
+        const accountId = accountResult.rows[0].id;
+        const remainingPoints = user.points - 100;
+
+        // 扣除积分
+        await pool.query('UPDATE users SET points = $1 WHERE id = $2', [remainingPoints, user.id]);
+
+        console.log(`💰 提取GitHub账号: ${device_id}, 账号ID: ${accountId}, 用户名: ${newAccount.username}, 剩余积分: ${remainingPoints}`);
+
+        res.json({
+            code: 0,
+            data: {
+                account_id: accountId,
+                email: newAccount.email,
+                username: newAccount.username,
+                github_token: newAccount.github_token,
+                profile_arn: newAccount.profile_arn,
+                remaining_points: remainingPoints
+            }
+        });
+    } catch (error) {
+        console.error('❌ 提取GitHub账号错误:', error);
+        res.json({ code: 1, message: '提取失败' });
+    }
+});
+
+// 9. 获取 GitHub 账号 Token
+app.post('/api/github/token', async (req, res) => {
+    try {
+        const { device_id, account_id } = req.body;
+
+        const userResult = await pool.query('SELECT * FROM users WHERE device_id = $1', [device_id]);
+        
+        if (userResult.rows.length === 0) {
+            return res.json({ code: 1, message: '用户不存在' });
+        }
+
+        const user = userResult.rows[0];
+
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND user_id = $2 AND source = $3',
+            [account_id, user.id, 'github']
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.json({ code: 1, message: 'GitHub账号不存在' });
+        }
+
+        const account = accountResult.rows[0];
+
+        console.log(`🔑 获取GitHub Token: ${device_id}, 用户名: ${account.github_username}`);
+
+        res.json({
+            code: 0,
+            data: {
+                email: account.email,
+                username: account.github_username,
+                github_token: account.github_token,
+                profile_arn: account.profile_arn
+            }
+        });
+    } catch (error) {
+        console.error('❌ 获取GitHub Token错误:', error);
+        res.json({ code: 1, message: '获取失败' });
+    }
 });
 
 // ==================== 管理接口 ====================
