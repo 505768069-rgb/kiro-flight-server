@@ -175,19 +175,33 @@ app.post('/api/admin/create-activation-code', async (req, res) => {
 // 添加 GitHub 账号（管理员接口）
 app.post('/api/admin/add-github-account', async (req, res) => {
     try {
-        const { admin_token, email, github_token, github_username, profile_arn, activated_code_id } = req.body;
+        const { admin_token, email, github_token, github_username, profile_arn, user_id, refresh_token, access_token } = req.body;
         
         if (admin_token !== ADMIN_TOKEN) {
             return res.json({ code: 1, message: '无权限' });
         }
         
+        if (!refresh_token && !access_token && !github_token) {
+            return res.json({ code: 1, message: '缺少 token (需要 refresh_token, access_token 或 github_token)' });
+        }
+        
         // 插入账号
         const result = await pool.query(
-            `INSERT INTO accounts (email, source, github_token, github_username, profile_arn, activated_code_id)
-             VALUES ($1, 'github', $2, $3, $4, $5)
+            `INSERT INTO accounts (user_id, email, source, github_token, github_username, profile_arn, refresh_token, access_token)
+             VALUES ($1, $2, 'github', $3, $4, $5, $6, $7)
              RETURNING id, email, github_username`,
-            [email, github_token, github_username, profile_arn || 'arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK', activated_code_id]
+            [
+                user_id || null, 
+                email || github_username || 'GitHub账号', 
+                github_token || '', 
+                github_username || '', 
+                profile_arn || 'arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK',
+                refresh_token || '',
+                access_token || ''
+            ]
         );
+        
+        console.log(`✅ 添加 GitHub 账号: ${email || github_username}`);
         
         res.json({
             code: 0,
@@ -196,6 +210,40 @@ app.post('/api/admin/add-github-account', async (req, res) => {
         });
     } catch (error: any) {
         console.error('添加 GitHub 账号失败:', error);
+        res.json({ code: 1, message: error.message });
+    }
+});
+
+// 添加 Google 账号（管理员接口）
+app.post('/api/admin/add-google-account', async (req, res) => {
+    try {
+        const { admin_token, email, refresh_token, client_id, client_secret, user_id } = req.body;
+        
+        if (admin_token !== ADMIN_TOKEN) {
+            return res.json({ code: 1, message: '无权限' });
+        }
+        
+        if (!refresh_token) {
+            return res.json({ code: 1, message: '缺少 refresh_token' });
+        }
+        
+        // 插入账号
+        const result = await pool.query(
+            `INSERT INTO accounts (user_id, email, source, refresh_token, client_id, client_secret)
+             VALUES ($1, $2, 'google', $3, $4, $5)
+             RETURNING id, email`,
+            [user_id || null, email || 'Google账号', refresh_token, client_id || '', client_secret || '']
+        );
+        
+        console.log(`✅ 添加 Google 账号: ${email}`);
+        
+        res.json({
+            code: 0,
+            message: 'Google 账号添加成功',
+            data: result.rows[0]
+        });
+    } catch (error: any) {
+        console.error('添加 Google 账号失败:', error);
         res.json({ code: 1, message: error.message });
     }
 });
@@ -210,11 +258,9 @@ app.post('/api/admin/list-accounts', async (req, res) => {
         }
         
         const result = await pool.query(
-            `SELECT a.id, a.email, a.source, a.github_username, a.is_hidden, 
-                    ac.code as activated_code, a.added_at
-             FROM accounts a
-             LEFT JOIN activated_codes ac ON a.activated_code_id = ac.id
-             ORDER BY a.added_at DESC`
+            `SELECT id, email, source, github_username, is_hidden, user_id, created_at
+             FROM accounts
+             ORDER BY created_at DESC`
         );
         
         res.json({
@@ -223,6 +269,31 @@ app.post('/api/admin/list-accounts', async (req, res) => {
         });
     } catch (error: any) {
         console.error('查询账号失败:', error);
+        res.json({ code: 1, message: error.message });
+    }
+});
+
+// 查看所有激活码（管理员接口）
+app.post('/api/admin/list-activation-codes', async (req, res) => {
+    try {
+        const { admin_token } = req.body;
+        
+        if (admin_token !== ADMIN_TOKEN) {
+            return res.json({ code: 1, message: '无权限' });
+        }
+        
+        const result = await pool.query(
+            `SELECT id, code, points, is_used, expire_at, used_by, created_at
+             FROM activation_codes
+             ORDER BY created_at DESC`
+        );
+        
+        res.json({
+            code: 0,
+            data: { codes: result.rows }
+        });
+    } catch (error: any) {
+        console.error('查询激活码失败:', error);
         res.json({ code: 1, message: error.message });
     }
 });
